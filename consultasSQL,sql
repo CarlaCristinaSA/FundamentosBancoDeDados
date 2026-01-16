@@ -1,0 +1,210 @@
+------------------
+-- Queries SQL  --
+------------------
+
+-- Query 1: Query utilizada no nosso sistema back-end para retornar dados para gráfico de pizza, no qual mostra a quantidade de casos ocorridos em cada localidade.
+
+SELECT 
+    a.endereco, COUNT(*) as quantidade            
+FROM 
+    ASSISTIDA a            
+JOIN CASO c ON a.id = c.id_assistida            
+AND a.endereco IS NOT NULL            
+GROUP BY a.endereco            
+ORDER BY quantidade DESC;
+
+-- Query 2: Endereços com maior número de filhos com deficiência que sofreram violência, ou que presenciaram violencia doméstica
+
+SELECT
+    a.endereco, COUNT(f.qtd_filhos_deficiencia) AS quantidade
+FROM assistida a
+LEFT JOIN filho f ON a.id = f.id_assistida
+WHERE (f.viu_violencia OR f.violencia_gravidez) AND f.qtd_filhos_deficiencia > 0
+GROUP BY a.endereco
+ORDER BY quantidade DESC;
+
+-- Query 3: Tempo médio entre a data de ocorrência da violência e a data de realização da denúncia, categoriazado por tipo de violência.
+
+select
+    tpv.tipo_violencia as "Tipos de Violência",
+    count(*) as "Quantidade de Casos",
+    round(avg(c.data - v.data_ocorrencia), 1) as "Média de dias até a realização da Denúncia",
+    min(c.data - v.data_ocorrencia) as "Mínimo de dias entre a data do ocorrido e a data da denúncia",
+    max(c.data - v.data_ocorrencia) as "Máximo de dias entre a data do ocorrido e a data da denúncia"
+from
+    caso c
+join
+    violencia v on c.id_caso = v.id_caso
+join
+    tipo_violencia tpv on v.id_violencia = tpv.id_violencia
+where
+    v.data_ocorrencia is not null
+    and c.data >= v.data_ocorrencia
+group by
+    tpv.tipo_violencia
+order by
+    "Média de dias até a realização da Denúncia" desc;
+
+-- Query 4: Diferença em dias entre a data de ocorrência da violência e a data de realização da denúncia para casos onde a assistida possui filhos com o agressor. 
+
+select 
+    (c.data - v.data_ocorrencia) as "Dias de Diferença" 
+from 
+    caso c 
+join 
+violencia v on c.id_caso = v.id_caso 
+where 
+v.data_ocorrencia is not null 
+and exists ( 
+    select * 
+    from filho f 
+    where f.id_assistida = c.id_assistida 
+    and f.qtd_filho_agressor > 0 
+);
+
+-- Query 5: Análise se o agressor estava sob efeito de algum entorpecente quando fez a agressão, quem ele agrediu, e quantas vezes:
+
+SELECT 
+    sa.tipo_substancia AS Agressor_Sob_Efeito_De,
+    aa.alvo_ameaca AS Quem_Ele_Ameacou,
+    tv.tipo_violencia AS O_Que_Ele_Fez_De_Fato,
+    COUNT(*) AS Ocorrencias
+FROM SUBSTANCIAS_AGRESSOR sa
+JOIN AMEACA_AGRESSOR aa ON sa.id_agressor = aa.id_agressor
+JOIN VIOLENCIA v ON sa.id_caso = v.id_caso
+JOIN TIPO_VIOLENCIA tv ON v.id_violencia = tv.id_violencia
+WHERE sa.tipo_substancia NOT ILIKE '%NAO%'
+GROUP BY sa.tipo_substancia, aa.alvo_ameaca, tv.tipo_violencia
+ORDER BY Ocorrencias DESC;
+
+-- Query 6: Análise da média de tempo que uma assistida demora para prestar queixa dependendo do seu relacionamento com o agressor
+
+SELECT 
+    ag.Vinculo AS Relacionamento,
+    COUNT(*) AS Qtd_Casos,
+    MIN(c.data - v.data_ocorrencia) || ' dias' AS Tempo_Minimo_Denuncia,
+    MAX(c.data - v.data_ocorrencia) || ' dias' AS Tempo_Maximo_Denuncia,
+    ROUND(AVG(c.data - v.data_ocorrencia), 0) || ' dias' AS Tempo_Medio_Denuncia
+FROM CASO c
+JOIN VIOLENCIA v ON c.id_caso = v.id_caso
+JOIN AGRESSOR ag ON c.id_caso = ag.id_caso
+WHERE 
+    v.data_ocorrencia IS NOT NULL 
+    AND c.data >= v.data_ocorrencia
+GROUP BY ag.Vinculo
+ORDER BY AVG(c.data - v.data_ocorrencia) DESC;
+
+-- Query 7: Análise de quantos tipos de agressão ocorreram com assistidas menores de idade
+
+SELECT 
+    tipos_fixos.nome_tipo AS Tipo_de_Violencia,
+    COUNT(DISTINCT dados_reais.id_assistida) AS Qtd_Vitimas_Menores
+FROM 
+    (VALUES ('FISICA'), ('PSICOLOGICA'), ('SEXUAL'), ('PATRIMONIAL'), ('MORAL')) AS tipos_fixos(nome_tipo)
+LEFT JOIN 
+    (
+        SELECT tv.tipo_violencia, v.id_assistida
+        FROM TIPO_VIOLENCIA tv
+        JOIN VIOLENCIA v ON tv.id_violencia = v.id_violencia
+        JOIN ASSISTIDA a ON v.id_assistida = a.id
+        WHERE a.idade < 18
+    ) AS dados_reais ON tipos_fixos.nome_tipo = dados_reais.tipo_violencia
+GROUP BY tipos_fixos.nome_tipo
+ORDER BY Qtd_Vitimas_Menores DESC;
+
+-- Query 8: Análise da quantidade de agressores por faixa etária
+
+SELECT 
+    ref.faixa AS Faixa_Etaria,
+    COUNT(a.id_agressor) AS Quantidade
+FROM 
+    (VALUES 
+        ('Menor que 13', 1), 
+        ('14 a 17', 2), 
+        ('18 a 30', 3), 
+        ('31 a 59', 4), 
+        ('60+', 5),
+        ('NÃO INFORMADO', 6)
+    ) AS ref(faixa, id_ordem)
+LEFT JOIN 
+    AGRESSOR a ON ref.faixa = (
+        CASE 
+            WHEN a.Idade <= 13 THEN 'Menor que 13'
+            WHEN a.Idade BETWEEN 14 AND 17 THEN '14 a 17'
+            WHEN a.Idade BETWEEN 18 AND 30 THEN '18 a 30'
+            WHEN a.Idade BETWEEN 31 AND 59 THEN '31 a 59'
+            WHEN a.Idade >= 60 THEN '60+'
+            ELSE 'NÃO INFORMADO'
+        END
+    )
+GROUP BY ref.faixa, ref.id_ordem
+ORDER BY ref.id_ordem ASC;
+
+-- Query 09: Ocorrência de abuso sexual em Assistidas com deficiência ou doença degenerativa por idade
+
+select distinct
+    a.id as "ID da Assistida",
+    a.idade as "Idade da Assistida",
+    ag.vinculo as "Vinculo da Assistida com o Agressor",
+    a.deficiencia as "Condição Limitante ou de Vunerabilidade Social"
+from assistida a
+join agressor ag ON a.id = ag.id_assistida
+join violencia v ON a.id = v.id_assistida
+where v.estupro is true and a.deficiencia != 'NAO INFORMADO'
+order by a.idade desc;
+
+-- Query 10: Tipo de Violência baseado em cor/raça
+
+select
+    brancas.tipo_violencia as "Tipo de Violência",
+    nbrancas.vitimas_nao_brancas as "Quantidade de Vítimas Não Brancas",
+    brancas.vitimas_brancas as "Quantidade de Vítimas Brancas"
+from
+    (select v.tipo_violencia, count(*) as "vitimas_brancas"
+    from assistida a
+    join tipo_violencia v on v.id_assistida = a.id
+    where a.cor_raca = 'BRANCA'
+    group by v.tipo_violencia) as brancas
+full outer join
+    (select v.tipo_violencia, count(*) as "vitimas_nao_brancas"
+    from assistida a
+    join tipo_violencia v on v.id_assistida = a.id
+    where a.cor_raca in ('PRETA','PARDA','INDÍGENA','AMARELA/ORIENTAL')
+    group by v.tipo_violencia) as nbrancas
+on brancas.tipo_violencia = nbrancas.tipo_violencia
+order by vitimas_nao_brancas desc;
+
+-- Query 11: Análise comparativa da prevalência de violência patrimonial e psicológica segregada pelo status de dependência financeira da vítima
+
+SELECT 
+    CASE 
+        WHEN C.depen_finc = true THEN 'SIM - Dependente' 
+        ELSE 'NÃO - Independente' 
+    END AS "Dependência Financeira",
+    COUNT(DISTINCT C.id_caso) AS "Total de Casos",
+    COUNT(DISTINCT CASE WHEN TV.tipo_violencia = 'Patrimonial' OR TV.tipo_violencia = 'PATRIMONIAL' THEN C.id_caso END) AS "Qtd. Violência Patrimonial",  
+    ROUND(
+        (COUNT(DISTINCT CASE WHEN TV.tipo_violencia = 'Patrimonial' OR TV.tipo_violencia = 'PATRIMONIAL' THEN C.id_caso END) * 100.0) / 
+        COUNT(DISTINCT C.id_caso), 2
+    ) || '%' AS "% Sofrem Violência Patrimonial",
+    ROUND(
+        (COUNT(DISTINCT CASE WHEN TV.tipo_violencia = 'Psicológica' OR TV.tipo_violencia = 'PSICOLÓGICA' THEN C.id_caso END) * 100.0) / 
+        COUNT(DISTINCT C.id_caso), 2
+    ) || '%' AS "% Sofrem Violência Psicológica"
+FROM CASO C
+JOIN VIOLENCIA V ON C.id_caso = V.id_caso
+JOIN TIPO_VIOLENCIA TV ON V.id_violencia = TV.id_violencia
+GROUP BY C.depen_finc
+ORDER BY C.depen_finc DESC;
+
+-- Query 12: Distribuição percentual das assistidas estratificada por nível de escolaridade para identificação do perfil educacional predominante
+
+SELECT  
+    A.escolaridade AS "Nível de Escolaridade",   
+    COUNT(A.id) AS "Total de Vítimas",
+    ROUND(
+        (COUNT(A.id) * 100.0) / (SELECT COUNT(*) FROM ASSISTIDA), 1
+    ) || '%' AS "% do Total"
+FROM ASSISTIDA A
+GROUP BY A.escolaridade
+ORDER BY "Total de Vítimas" DESC;
